@@ -10,11 +10,13 @@
 // (ADR-096 §8.5) is finalized.
 
 pub mod config;
+pub mod dense;
 pub mod error;
 pub mod sparse;
 pub mod weights;
 
 pub use config::{TemporalBackendKind, TemporalHeadConfig};
+pub use dense::DenseHead;
 pub use error::TemporalError;
 pub use sparse::SparseGqaHead;
 pub use weights::{
@@ -28,12 +30,13 @@ pub use ruvllm_sparse_attention::{KvCache, Tensor3};
 
 /// Thin facade so callers can pick a backend by name.
 ///
-/// Today only `SparseGqa` is implemented; `Dense` is reserved per
-/// ADR-096 §4.4 and returns `TemporalError::DenseBackendNotImplemented`
-/// until the back-compat path lands.
+/// Both backends implement `forward()` for prefill. Only `SparseGqa`
+/// implements `step()` (streaming O(log T) decode against KvCache);
+/// dense MHA structurally lacks a streaming counterpart and returns
+/// `TemporalError::BackendDoesNotSupportStreaming` on `step()`.
 pub enum AetherTemporalHead {
     SparseGqa(SparseGqaHead),
-    Dense, // placeholder; ADR-096 §4.4 selection rule
+    Dense(DenseHead),
 }
 
 impl AetherTemporalHead {
@@ -42,7 +45,7 @@ impl AetherTemporalHead {
             TemporalBackendKind::SparseGqa => {
                 Ok(AetherTemporalHead::SparseGqa(SparseGqaHead::new(cfg)?))
             }
-            TemporalBackendKind::Dense => Err(TemporalError::DenseBackendNotImplemented),
+            TemporalBackendKind::Dense => Ok(AetherTemporalHead::Dense(DenseHead::new(cfg)?)),
         }
     }
 
@@ -59,7 +62,7 @@ impl AetherTemporalHead {
     ) -> Result<Tensor3, TemporalError> {
         match self {
             AetherTemporalHead::SparseGqa(h) => h.forward(q, k, v),
-            AetherTemporalHead::Dense => Err(TemporalError::DenseBackendNotImplemented),
+            AetherTemporalHead::Dense(h) => h.forward(q, k, v),
         }
     }
 
@@ -69,6 +72,9 @@ impl AetherTemporalHead {
     ///
     /// Returns the attention output for the single new token. Caller
     /// is responsible for downstream pooling / classifier head.
+    ///
+    /// Dense backend returns `BackendDoesNotSupportStreaming` — no
+    /// dense-MHA-with-KV-cache equivalent exists, by design.
     pub fn step(
         &self,
         q_new: &Tensor3,
@@ -78,17 +84,22 @@ impl AetherTemporalHead {
     ) -> Result<Tensor3, TemporalError> {
         match self {
             AetherTemporalHead::SparseGqa(h) => h.step(q_new, k_new, v_new, cache),
-            AetherTemporalHead::Dense => Err(TemporalError::DenseBackendNotImplemented),
+            AetherTemporalHead::Dense(_) => {
+                Err(TemporalError::BackendDoesNotSupportStreaming)
+            }
         }
     }
 
     /// Allocate a `KvCache` sized correctly for this head. Convenience
     /// wrapper so AETHER's `pose_tracker.rs` doesn't need to import
     /// the upstream crate.
+    ///
+    /// Dense backend returns `BackendDoesNotSupportStreaming` — there
+    /// is no cache to size for a dense kernel.
     pub fn make_cache(&self, capacity: usize) -> Result<KvCache, TemporalError> {
         match self {
             AetherTemporalHead::SparseGqa(h) => Ok(h.make_cache(capacity)),
-            AetherTemporalHead::Dense => Err(TemporalError::DenseBackendNotImplemented),
+            AetherTemporalHead::Dense(_) => Err(TemporalError::BackendDoesNotSupportStreaming),
         }
     }
 }

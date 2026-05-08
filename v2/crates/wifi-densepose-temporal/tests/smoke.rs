@@ -63,18 +63,38 @@ fn sparse_mha_path_runs_when_qkv_heads_match() {
 }
 
 #[test]
-fn dense_backend_returns_typed_error() {
+fn dense_backend_forward_runs_with_matching_shape() {
+    // Dense_attention upstream requires q_heads == kv_heads (no GQA).
+    // Use MHA shape; n_classes/n_layers don't matter for forward-only.
     let cfg = TemporalHeadConfig {
         backend: TemporalBackendKind::Dense,
         q_heads: 4,
-        kv_heads: 1,
-        head_dim: 32,
-        window: 32,
-        block_size: 16,
+        kv_heads: 4,
+        head_dim: 16,
+        window: 8,
+        block_size: 4,
         causal: true,
     };
-    let err = AetherTemporalHead::new(&cfg).err().expect("dense rejected");
-    matches!(err, TemporalError::DenseBackendNotImplemented);
+    let head = AetherTemporalHead::new(&cfg).expect("construct dense");
+    let (q, k, v) = make_qkv(32, 4, 4, 16);
+    let out = head.forward(&q, &k, &v).expect("dense forward");
+    assert_eq!(out.shape(), (32, 4, 16));
+}
+
+#[test]
+fn dense_backend_step_returns_streaming_error() {
+    let cfg = TemporalHeadConfig {
+        backend: TemporalBackendKind::Dense,
+        q_heads: 4,
+        kv_heads: 4,
+        head_dim: 16,
+        window: 8,
+        block_size: 4,
+        causal: true,
+    };
+    let head = AetherTemporalHead::new(&cfg).expect("construct dense");
+    let cache_err = head.make_cache(32).err().expect("no cache for dense");
+    matches!(cache_err, TemporalError::BackendDoesNotSupportStreaming);
 }
 
 #[test]
