@@ -8,7 +8,9 @@
 //! holds a list of trait objects so the call site doesn't grow when we
 //! add primitives in P4.5b.
 
-use super::common::{PrimitiveConfig, PrimitiveState, RawSnapshot, Reason};
+use super::common::{PrimitiveConfig, PrimitiveState, RawSnapshot};
+#[cfg(test)]
+use super::common::Reason;
 use super::{
     bathroom::BathroomOccupied,
     bed_exit::BedExit,

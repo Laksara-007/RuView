@@ -1,0 +1,94 @@
+name: ADR-115 MQTT integration tests
+
+# Runs the Mosquitto-broker-backed integration tests for ADR-115's MQTT
+# publisher. These prove the publisher reaches a real broker, emits the
+# expected HA-discovery topic shape, and honours --privacy-mode at the
+# wire boundary (not just in unit-test logic).
+#
+# Default `cargo test --workspace` does not run these tests because they
+# require a broker and pull rumqttc into the build. This workflow opts
+# into both by setting --features mqtt and RUVIEW_RUN_INTEGRATION=1.
+
+on:
+  pull_request:
+    paths:
+      - 'v2/crates/wifi-densepose-sensing-server/src/mqtt/**'
+      - 'v2/crates/wifi-densepose-sensing-server/tests/mqtt_integration.rs'
+      - 'v2/crates/wifi-densepose-sensing-server/Cargo.toml'
+      - '.github/workflows/mqtt-integration.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/wifi-densepose-sensing-server/src/mqtt/**'
+  workflow_dispatch: {}
+
+jobs:
+  mqtt-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mosquitto:
+        image: eclipse-mosquitto:2.0.18
+        ports:
+          - 11883:1883
+        # No auth — we test the wire shape, not auth. Production
+        # deployments enable mTLS per ADR-115 §3.9.
+        options: >-
+          --health-cmd "mosquitto_pub -h localhost -p 1883 -t healthcheck -m ok -q 0 || exit 0"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      RUVIEW_RUN_INTEGRATION: "1"
+      RUVIEW_TEST_MQTT_PORT: "11883"
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for mosquitto to be reachable
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y mosquitto-clients
+          for i in {1..20}; do
+            if mosquitto_pub -h 127.0.0.1 -p 11883 -t healthcheck -m ok -q 0; then
+              echo "mosquitto reachable on 11883"; exit 0
+            fi
+            sleep 2
+          done
+          echo "mosquitto never became reachable" >&2; exit 1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: v2 -> target
+
+      - name: Verify unit tests still pass under --features mqtt
+        working-directory: v2
+        run: >-
+          cargo test -p wifi-densepose-sensing-server
+          --features mqtt --no-default-features
+          --lib mqtt:: semantic:: cli::tests
+          --no-fail-fast
+
+      - name: Run integration tests against mosquitto
+        working-directory: v2
+        run: >-
+          cargo test -p wifi-densepose-sensing-server
+          --features mqtt --no-default-features
+          --test mqtt_integration
+          --no-fail-fast
+          -- --test-threads=1 --nocapture
+
+      - name: Dump broker logs on failure
+        if: failure()
+        run: |
+          docker ps -a
+          docker logs $(docker ps -aqf "ancestor=eclipse-mosquitto:2.0.18") || true
