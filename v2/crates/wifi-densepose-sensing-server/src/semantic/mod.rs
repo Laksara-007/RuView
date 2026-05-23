@@ -46,16 +46,18 @@
 //! Each module exports a struct implementing [`Primitive`] and a `new`
 //! constructor that takes a [`PrimitiveConfig`].
 
-// Primitives landing in P4.5a (this iteration):
 mod bathroom;
+mod bed_exit;
 mod bus;
 mod common;
+mod distress;
+mod elderly_anomaly;
+mod fall_risk;
+mod meeting;
+mod multi_room;
 mod no_movement;
 mod room_active;
 mod sleeping;
-
-// Primitives landing in P4.5b (next iteration): bed_exit, distress,
-// elderly_anomaly, fall_risk, meeting, multi_room.
 
 pub use bus::{SemanticBus, SemanticEvent, SemanticKind};
 pub use common::{PrimitiveConfig, PrimitiveState, RawSnapshot, Reason};

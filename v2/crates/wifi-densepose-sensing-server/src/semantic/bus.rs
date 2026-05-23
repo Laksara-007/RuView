@@ -9,17 +9,33 @@
 //! add primitives in P4.5b.
 
 use super::common::{PrimitiveConfig, PrimitiveState, RawSnapshot, Reason};
-use super::{bathroom::BathroomOccupied, no_movement::NoMovement, room_active::RoomActive, sleeping::SomeoneSleeping};
+use super::{
+    bathroom::BathroomOccupied,
+    bed_exit::BedExit,
+    distress::PossibleDistress,
+    elderly_anomaly::ElderlyInactivityAnomaly,
+    fall_risk::FallRiskElevated,
+    meeting::MeetingInProgress,
+    multi_room::MultiRoomTransition,
+    no_movement::NoMovement,
+    room_active::RoomActive,
+    sleeping::SomeoneSleeping,
+};
 
 /// Identifier for which primitive produced an event. Used by the
 /// publisher to map onto the matching `EntityKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SemanticKind {
     SomeoneSleeping,
+    PossibleDistress,
     RoomActive,
+    ElderlyAnomaly,
+    Meeting,
     BathroomOccupied,
+    FallRisk,
+    BedExit,
     NoMovement,
-    // P4.5b: Distress, ElderlyAnomaly, Meeting, FallRisk, BedExit, MultiRoom.
+    MultiRoom,
 }
 
 /// One event published to MQTT / Matter consumers.
@@ -34,9 +50,15 @@ pub struct SemanticEvent {
 /// Collection of every primitive FSM. Owned by the publisher task.
 pub struct SemanticBus {
     sleeping: SomeoneSleeping,
+    distress: PossibleDistress,
     room_active: RoomActive,
+    elderly_anomaly: ElderlyInactivityAnomaly,
+    meeting: MeetingInProgress,
     bathroom: BathroomOccupied,
+    fall_risk: FallRiskElevated,
+    bed_exit: BedExit,
     no_movement: NoMovement,
+    multi_room: MultiRoomTransition,
     pub config: PrimitiveConfig,
 }
 
@@ -44,9 +66,15 @@ impl SemanticBus {
     pub fn new(config: PrimitiveConfig) -> Self {
         Self {
             sleeping: SomeoneSleeping::new(),
+            distress: PossibleDistress::new(),
             room_active: RoomActive::new(),
+            elderly_anomaly: ElderlyInactivityAnomaly::new(),
+            meeting: MeetingInProgress::new(),
             bathroom: BathroomOccupied::new(),
+            fall_risk: FallRiskElevated::new(),
+            bed_exit: BedExit::new(),
             no_movement: NoMovement::new(),
+            multi_room: MultiRoomTransition::new(),
             config,
         }
     }
@@ -54,11 +82,17 @@ impl SemanticBus {
     /// Run all primitives on one snapshot. Returns only events that
     /// emit (Idle states are filtered).
     pub fn tick(&mut self, snap: &RawSnapshot) -> Vec<SemanticEvent> {
-        let pairs: [(SemanticKind, PrimitiveState); 4] = [
-            (SemanticKind::SomeoneSleeping, self.sleeping.tick(snap, &self.config)),
-            (SemanticKind::RoomActive,      self.room_active.tick(snap, &self.config)),
-            (SemanticKind::BathroomOccupied, self.bathroom.tick(snap, &self.config)),
-            (SemanticKind::NoMovement,      self.no_movement.tick(snap, &self.config)),
+        let pairs: [(SemanticKind, PrimitiveState); 10] = [
+            (SemanticKind::SomeoneSleeping,   self.sleeping.tick(snap, &self.config)),
+            (SemanticKind::PossibleDistress,  self.distress.tick(snap, &self.config)),
+            (SemanticKind::RoomActive,        self.room_active.tick(snap, &self.config)),
+            (SemanticKind::ElderlyAnomaly,    self.elderly_anomaly.tick(snap, &self.config)),
+            (SemanticKind::Meeting,           self.meeting.tick(snap, &self.config)),
+            (SemanticKind::BathroomOccupied,  self.bathroom.tick(snap, &self.config)),
+            (SemanticKind::FallRisk,          self.fall_risk.tick(snap, &self.config)),
+            (SemanticKind::BedExit,           self.bed_exit.tick(snap, &self.config)),
+            (SemanticKind::NoMovement,        self.no_movement.tick(snap, &self.config)),
+            (SemanticKind::MultiRoom,         self.multi_room.tick(snap, &self.config)),
         ];
         pairs
             .into_iter()
