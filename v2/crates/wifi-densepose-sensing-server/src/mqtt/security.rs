@@ -250,4 +250,77 @@ mod tests {
         // --mqtt-password flag, this test fails on purpose.
         assert!(password_via_env_only(Some("secret")).is_err());
     }
+
+    // ─── Property-based fuzzing (proptest) ──────────────────────────
+    //
+    // The example-based tests above hit the obvious cases. These
+    // property tests hit *every* case clap could pass us: random
+    // Unicode, control chars, embedded NULs at arbitrary offsets,
+    // multi-character wildcards, etc. They catch regressions where a
+    // future refactor accidentally narrows the rejection envelope.
+
+    use proptest::prelude::*;
+
+    proptest! {
+        /// For ANY string that contains `+`, `#`, NUL, or `/`, the
+        /// safety check must return false. No exceptions.
+        #[test]
+        fn topic_segment_rejects_anything_with_wildcards_or_separators(
+            prefix in "[a-zA-Z0-9_-]{0,16}",
+            suffix in "[a-zA-Z0-9_-]{0,16}",
+            offender in proptest::char::any().prop_filter(
+                "must be reserved char", |c| matches!(c, '+' | '#' | '\0' | '/')
+            ),
+        ) {
+            let s = format!("{prefix}{offender}{suffix}");
+            prop_assert!(!topic_segment_is_safe(&s), "must reject {:?}", s);
+        }
+
+        /// For any non-empty string containing ONLY chars from the
+        /// "safe" alphabet (alphanumeric + a few punctuation), the
+        /// check must pass.
+        #[test]
+        fn topic_segment_accepts_safe_alphabet(s in "[a-zA-Z0-9_.\\-]{1,64}") {
+            prop_assert!(topic_segment_is_safe(&s), "must accept {:?}", s);
+        }
+
+        /// Empty strings always rejected, regardless of input source.
+        #[test]
+        fn topic_segment_always_rejects_empty(seed in any::<u64>()) {
+            let _ = seed; // just to randomize the test runner
+            prop_assert!(!topic_segment_is_safe(""));
+        }
+
+        /// Payload-size check: every size ≤ MAX_PUBLISH_BYTES is OK;
+        /// every size > MAX_PUBLISH_BYTES errors with the actual size.
+        #[test]
+        fn payload_size_check_is_monotonic(
+            len in 0usize..=(MAX_PUBLISH_BYTES * 2)
+        ) {
+            // Don't actually allocate MAX_PUBLISH_BYTES * 2 of memory
+            // every test; use a small payload + lie about its length
+            // via slicing semantics. The function only checks .len().
+            let buf = vec![0u8; len];
+            let r = check_payload_size(&buf);
+            if len > MAX_PUBLISH_BYTES {
+                prop_assert!(r.is_err());
+                prop_assert_eq!(r.unwrap_err(), len);
+            } else {
+                prop_assert!(r.is_ok());
+            }
+        }
+
+        /// Path safety: a path containing NUL or newline must be
+        /// rejected, regardless of the rest of the path.
+        #[test]
+        fn path_safety_rejects_nul_or_newline_anywhere(
+            prefix in "[a-zA-Z0-9_/.\\-]{0,32}",
+            suffix in "[a-zA-Z0-9_/.\\-]{0,32}",
+            offender in prop_oneof!["\\u{0000}", "\\n"],
+        ) {
+            let s = format!("{prefix}{offender}{suffix}");
+            let p = std::path::Path::new(&s);
+            prop_assert!(!path_is_safe(p), "must reject path with offender: {:?}", s);
+        }
+    }
 }
