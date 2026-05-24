@@ -16,6 +16,10 @@
 
 use pyo3::prelude::*;
 
+mod bindings {
+    pub mod keypoint;
+}
+
 /// Version of the bound Rust core. Surfaced to Python as
 /// `wifi_densepose.__rust_version__` so users can correlate wheel
 /// behaviour with the exact `v2/crates/` HEAD it was built from.
@@ -30,8 +34,8 @@ const RUST_BUILD_TAG: &str = env!("CARGO_PKG_VERSION");
 /// time. Helps users debug "is my wheel the slim one or the full one?".
 fn build_features() -> Vec<&'static str> {
     let mut feats: Vec<&'static str> = Vec::new();
-    // P2 will turn this into a real cfg-driven list as features land.
     feats.push("p1-scaffold");
+    feats.push("p2-keypoint-bindings"); // Keypoint + KeypointType
     feats
 }
 
@@ -60,5 +64,8 @@ fn wifi_densepose_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__rust_build_tag__", RUST_BUILD_TAG)?;
     m.add("__build_features__", build_features())?;
     m.add_function(wrap_pyfunction!(hello, m)?)?;
+
+    // P2 — Keypoint + KeypointType bindings.
+    bindings::keypoint::register(m)?;
     Ok(())
 }

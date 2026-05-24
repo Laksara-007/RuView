@@ -35,6 +35,14 @@ __version__ = "2.0.0a1"
 # Users always import from `wifi_densepose` directly.
 from wifi_densepose import _native
 
+# ─── P2 — Core type re-exports ───────────────────────────────────────
+# Bound types land in `wifi_densepose._native` and are re-exported here
+# under their stable public names. Users always `from wifi_densepose
+# import Keypoint, KeypointType` — never reach into `_native`.
+Keypoint = _native.Keypoint
+KeypointType = _native.KeypointType
+
+
 __rust_version__: str = _native.__rust_version__
 """Version of the bound Rust core. Useful for bug reports."""
 
@@ -63,4 +71,7 @@ __all__ = [
     "__rust_build_tag__",
     "__build_features__",
     "hello",
+    # P2 — core types
+    "Keypoint",
+    "KeypointType",
 ]
